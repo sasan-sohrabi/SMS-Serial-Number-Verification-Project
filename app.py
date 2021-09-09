@@ -1,5 +1,6 @@
 import requests
 from flask import Flask, jsonify, request
+from pandas import read_excel
 from kavenegar import KavenegarAPI
 from config import *
 
@@ -34,13 +35,22 @@ def process():
 
 
 def send_sms(receptor, message):
-    """This function will get a MSIDN and a message, then
+    """ This function will get a MSIDN and a message, then
     uses KaveNegar to send sms.
     """
     api = KavenegarAPI(API_KEY)
     params = {'sender': '10000400600600', 'receptor': receptor, 'message': message}
     response = api.sms_send(params)
     print(f"message *{message}* sent. status code is {response.status_code}")
+
+
+def import_database_from_excel(filepath):
+    """ Get an excel file name and imports lookup data(data and failures) from it"""
+    # df contains lookup data in the form of
+    # Row 	Reference Number 	Description	Start Serial 	End Serial 	Date
+    df = read_excel(filepath, 0)
+
+    df = read_excel(filepath, 1)  # Sheet one contains failed serial numbers. Only one column
 
 
 def check_serial():
