@@ -1,5 +1,5 @@
 from kavenegar import *
 
-api = KavenegarAPI('76674C413530365252777A584957586E6B365971714E685A726C4A7676544E624568447A67684C6C5455303D')
-params = {'sender': '1000596446', 'receptor': '09195145937', 'message': '.وب سرویس پیام کوتاه کاوه نگار'}
+api = KavenegarAPI('39784B664E4442664D64717676696C566E763857316A556D39436D6C785251616F4C4F55367351694375513D')
+params = {'sender': '10000400600600', 'receptor': '09125915669', 'message': 'صرفا جهت تست'}
 response = api.sms_send(params)
