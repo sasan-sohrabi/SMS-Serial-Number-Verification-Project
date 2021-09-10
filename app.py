@@ -1,3 +1,4 @@
+import re
 import sqlite3
 from flask import Flask, jsonify, request
 import pandas as pd
@@ -7,11 +8,11 @@ import config
 app = Flask(__name__)
 
 
-@app.route('/')
-def main_page():
-    """This is the main page of the site
-    """
-    return 'Hello Sasan!!!!'
+# For checking that system is working or not.
+@app.route('/v1/ok')
+def health_check():
+    check = {'message': 'ok'}
+    return jsonify(check), 200
 
 
 @app.route('/v1/process', methods=['POST'])
@@ -27,14 +28,14 @@ def process():
     # For receive data from sms
     data = request.form
     sender = data['from']
-    message = data['message']
+    message = normalize_string(data['message'])
     print(f"receive {message} from {sender}")
 
     ret = {'message': 'processed'}
     return jsonify(ret), 200
 
 
-def send_sms(receptor, message):
+def send_sms(receptor: str, message: str) -> None:
     """ This function will get a MSIDN and a message, then
     uses KaveNegar to send sms.
     """
@@ -42,6 +43,16 @@ def send_sms(receptor, message):
     params = {'sender': '10000400600600', 'receptor': receptor, 'message': message}
     response = api.sms_send(params)
     print(f"message *{message}* sent. status code is {response.status_code}")
+
+
+def normalize_string(input_str: str):
+    from_char = '۱۲۳۴۵۶۷۸۹۰'
+    to_char = '1234567890'
+    for i in range(len(from_char)):
+        input_str = input_str.replace(from_char[i], to_char[i])
+    input_str = input_str.upper()
+    input_str = re.sub(r'\W+', '', input_str)  # Remove any non alphanumeric character.
+    return input_str
 
 
 def import_database_from_excel(filepath):
@@ -64,8 +75,10 @@ def import_database_from_excel(filepath):
                     end_serial TEXT,
                     date DATE);""")
     # df_serials contains lookup data in the form of
-    # Row 	Reference Number 	Description	Start Serial 	End Serial 	Date
+    # row 	reference_number 	description	start_serial 	end_serial 	date
     df_serials = pd.read_excel(filepath, 0)
+    df_serials[df_serials.columns[3]] = df_serials[df_serials.columns[3]].apply(normalize_string)
+    df_serials[df_serials.columns[4]] = df_serials[df_serials.columns[4]].apply(normalize_string)
     df_serials.to_sql(name='serials', con=sqlite_connection, if_exists='replace', index=True)
 
     # Remove the invalids table if exists, then create new one
@@ -76,6 +89,7 @@ def import_database_from_excel(filepath):
     # df_invalids contains lookup data in the form of
     # Faulty
     df_invalids = pd.read_excel(filepath, 1)  # Sheet one contains failed serial numbers. Only one column
+    df_invalids['faulty'] = df_invalids['faulty'].apply(normalize_string)
     df_invalids.to_sql(name='invalids', con=sqlite_connection, if_exists='replace', index=True)
 
     sqlite_connection.close()
