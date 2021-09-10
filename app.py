@@ -15,26 +15,6 @@ def health_check():
     return jsonify(check), 200
 
 
-@app.route('/v1/process', methods=['POST'])
-def process():
-    """This is callback from KaveNegar, will get sender and message and will
-    check if it is valid. Then answers back.
-    """
-
-    # For Debugging
-    import pdb
-    # pdb.set_trace()
-
-    # For receive data from sms
-    data = request.form
-    sender = data['from']
-    message = normalize_string(data['message'])
-    print(f"receive {message} from {sender}")
-
-    ret = {'message': 'processed'}
-    return jsonify(ret), 200
-
-
 def send_sms(receptor: str, message: str) -> None:
     """ This function will get a MSIDN and a message, then
     uses KaveNegar to send sms.
@@ -95,12 +75,52 @@ def import_database_from_excel(filepath):
     sqlite_connection.close()
 
 
-def check_serial():
-    pass
+def check_serial(serial: str):
+    """ This function will get one serial number and return appropriate
+    answer to that, after consulting the db.
+    """
+    sqlite_connection = sqlite3.connect(config.DATABASE_FILE_PATH)
+    cursor = sqlite_connection.cursor()
+
+    query = f"SELECT * FROM invalids WHERE faulty == '{serial}'"
+    results = cursor.execute(query)
+    if len(results.fetchall()) == 1:
+        return 'This serial is among failed ones'
+
+    query = f"SELECT * FROM serials WHERE start_serial < '{serial}' and end_serial > '{serial}'"
+    results = cursor.execute(query)
+    if len(results.fetchall()) == 1:
+        return 'I found your serial'
+
+    return 'It was not in the db'
+
+
+@app.route('/v1/process', methods=['POST'])
+def process():
+    """This is callback from KaveNegar, will get sender and message and will
+    check if it is valid. Then answers back.
+    """
+
+    # For Debugging
+    # import pdb
+    # pdb.set_trace()
+
+    # For receive data from sms
+    data = request.form
+    sender = data['from']
+    message = normalize_string(data['message'])
+    print(f"receive {message} from {sender}")
+
+    answer = check_serial(message)
+    send_sms(sender, answer)
+
+    ret = {'message': 'processed'}
+    return jsonify(ret), 200
 
 
 if __name__ == '__main__':
-    # For Test
-    # send_sms('09125915669', 'Hi Sasan')
-    # app.run(host="0.0.0.0", port=5000)
     import_database_from_excel('Data/data.xlsx')
+
+    print(check_serial('JJ1000002'))
+
+    app.run(host="0.0.0.0", port=5000)
