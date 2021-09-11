@@ -47,7 +47,7 @@ def login():
         password = request.form['password']
         if password == config.PASSWORD and username == config.USERNAME:
             login_user(user)
-            return redirect(request.args.get("next"))  # TODO: check url validaty
+            return redirect('/')
         else:
             return abort(401)
     else:
@@ -97,13 +97,28 @@ def send_sms(receptor: str, message: str) -> None:
     print(f"message *{message}* sent. status code is {response.status_code}")
 
 
-def normalize_string(input_str: str):
-    from_char = '۱۲۳۴۵۶۷۸۹۰'
+def normalize_string(input_str: str, fixed_size=30):
+    from_persian_char = '۱۲۳۴۵۶۷۸۹۰'
+    from_arabic_char = '٠١٢٣٤٥٦٧٨٩'
     to_char = '1234567890'
-    for i in range(len(from_char)):
-        input_str = input_str.replace(from_char[i], to_char[i])
+
+    for i in range(len(to_char)):
+        input_str = input_str.replace(from_persian_char[i], to_char[i])
+        input_str = input_str.replace(from_arabic_char[i], to_char[i])
     input_str = input_str.upper()
     input_str = re.sub(r'\W+', '', input_str)  # Remove any non alphanumeric character.
+
+    all_alpha = ''
+    all_digit = ''
+    for c in input_str:
+        if c.isalpha():
+            all_alpha += c
+        if c.isdigit():
+            all_digit += c
+
+    missing_zeros = fixed_size - len(all_alpha) - len(all_digit)
+
+    input_str = all_alpha + '0' * missing_zeros + all_digit
     return input_str
 
 
