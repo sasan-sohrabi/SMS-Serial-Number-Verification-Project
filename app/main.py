@@ -7,6 +7,8 @@ import pandas as pd
 from werkzeug.utils import secure_filename
 from kavenegar import KavenegarAPI
 import config
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 
@@ -213,7 +215,7 @@ def check_serial(serial: str):
 
     query = f"SELECT * FROM serials WHERE start_serial < '{serial}' and end_serial > '{serial}'"
     results = cursor.execute(query)
-    if len(results.fetchall()) == 1:
+    if len(results.fetchall()) > 0:
         return 'I found your serial'
 
     return 'It was not in the db'
