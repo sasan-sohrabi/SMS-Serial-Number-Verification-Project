@@ -3,11 +3,13 @@ charset-normalizer==2.0.4
 click==8.0.1
 et-xmlfile==1.1.0
 Flask==2.0.1
+Flask-Limiter==1.4
 Flask-Login==0.5.0
 idna==3.2
 itsdangerous==2.0.1
 Jinja2==3.0.1
 kavenegar==1.1.2
+limits==1.5.1
 MarkupSafe==2.0.1
 numpy==1.21.2
 openpyxl==3.0.7
