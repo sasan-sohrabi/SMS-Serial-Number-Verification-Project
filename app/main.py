@@ -12,6 +12,11 @@ from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 
+limiter = Limiter(
+    app,
+    key_func=get_remote_address,
+)
+
 UPLOAD_FOLDER = config.UPLOAD_FOLDER
 ALLOWED_EXTENSIONS = config.ALLOWED_EXTENSIONS
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -80,6 +85,7 @@ def home():
 
 # somewhere to login
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute")
 def login():
     if request.method == 'POST':
         username = request.form['username']
