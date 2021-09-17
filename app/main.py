@@ -1,14 +1,16 @@
 import os
 import re
-import sqlite3
-from flask import Flask, jsonify, request, Response, redirect, url_for, request, session, abort, flash
-from flask_login import LoginManager, UserMixin, login_required, login_user, logout_user
+from flask import Flask, jsonify, request, Response, redirect, url_for, request, session, abort, flash, render_template
+from flask_login import LoginManager, UserMixin, login_required, login_user, logout_user, current_user
 import pandas as pd
 from werkzeug.utils import secure_filename
 from kavenegar import KavenegarAPI
 import config
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from sqlalchemy import create_engine
+import psycopg2
+import pymysql
 
 app = Flask(__name__)
 
@@ -58,22 +60,23 @@ def home():
     if request.method == 'POST':
         # check if the post request has the file part
         if 'file' not in request.files:
-            flash('No file part')
+            flash('No file part', 'danger')
             return redirect(request.url)
         file = request.files['file']
         # If the user does not select a file, the browser submits an
         # empty file without a filename.
         if file.filename == '':
-            flash('No selected file')
+            flash('No selected file', 'danger')
             return redirect(request.url)
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
             import_database_from_excel(file_path)
-            os.remove(file_path)
+            flash('Import excel file to database successfully!', 'success')
+            #
             return redirect('/')
-    return '''
+    html_str = '''
     <!doctype html>
     <title>Upload new File</title>
     <h1>Upload new File</h1>
@@ -82,12 +85,15 @@ def home():
       <input type=submit value=Upload>
     </form>
     '''
+    return render_template('index.html')
 
 
 # somewhere to login
 @app.route("/login", methods=["GET", "POST"])
-@limiter.limit("5 per minute")
+@limiter.limit("10 per minute")
 def login():
+    if current_user.is_authenticated:
+        return redirect('/')
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
@@ -97,13 +103,14 @@ def login():
         else:
             return abort(401)
     else:
-        return Response('''
+        html_str = Response('''
         <form action="" method="post">
             <p><input type=text name=username>
             <p><input type=password name=password>
             <p><input type=submit value=Login>
         </form>
         ''')
+        return render_template('login.html')
 
 
 # somewhere to logout
@@ -111,13 +118,15 @@ def login():
 @login_required
 def logout():
     logout_user()
-    return Response('<p>Logged out</p>')
+    flash('Logged out', 'success')
+    return redirect('/login')
 
 
 # handle login failed
 @app.errorhandler(401)
 def page_not_found(error):
-    return Response('<p>Login failed</p>')
+    flash('Login Problem', 'danger')
+    return redirect('/login')
 
 
 # callback to reload the user object
@@ -173,55 +182,70 @@ def import_database_from_excel(filepath):
      sqlite database.
      """
 
-    # Connect to database
-    sqlite_connection = sqlite3.connect(config.DATABASE_FILE_PATH)
-    cursor = sqlite_connection.cursor()
-    print("Successfully Connected to SQLite")
+    # CONNECTION to DATABASE
+    conn_string = f"postgresql://{config.POST_HOST_USERNAME}:{config.POST_HOST_PASSWORD}@{config.POST_HOST}/{config.POST_HOST_DB_NAME}"
+    db = create_engine(conn_string)
+    conn = db.connect()
+    print("Successfully Connected to Postgresql")
+
+    pg_conn = psycopg2.connect(conn_string)
+    cur = pg_conn.cursor()
 
     # Remove the serials table if exists, then create new one
-    cursor.execute('Drop TABLE IF EXISTS serials')
-    cursor.execute("""CREATE TABLE IF NOT EXISTS serials (
+    cur.execute('Drop TABLE IF EXISTS serials')
+    cur.execute("""CREATE TABLE serials (
                     id INTEGER PRIMARY KEY,
-                    ref TEXT,
-                    desc TEXT,
-                    start_serial TEXT,
-                    end_serial TEXT,
+                    ref VARCHAR(100),
+                    description VARCHAR(200),
+                    start_serial CHAR(30),
+                    end_serial CHAR(30),
                     date DATE);""")
+    pg_conn.commit()
+
     # df_serials contains lookup data in the form of
     # row 	reference_number 	description	start_serial 	end_serial 	date
     df_serials = pd.read_excel(filepath, 0)
     df_serials[df_serials.columns[3]] = df_serials[df_serials.columns[3]].apply(normalize_string)
     df_serials[df_serials.columns[4]] = df_serials[df_serials.columns[4]].apply(normalize_string)
-    df_serials.to_sql(name='serials', con=sqlite_connection, if_exists='replace', index=True)
+    df_serials.to_sql(name='serials', con=conn, if_exists='replace', index=True)
 
     # Remove the invalids table if exists, then create new one
-    cursor.execute('Drop TABLE IF EXISTS invalids')
-    cursor.execute("""CREATE TABLE IF NOT EXISTS invalids (
+    cur.execute('Drop TABLE IF EXISTS invalids')
+    cur.execute("""CREATE TABLE  invalids (
                     id INTEGER PRIMARY KEY,
-                    faulty TEXT);""")
+                    faulty CHAR(30));""")
+    pg_conn.commit()
     # df_invalids contains lookup data in the form of
     # Faulty
     df_invalids = pd.read_excel(filepath, 1)  # Sheet one contains failed serial numbers. Only one column
     df_invalids['faulty'] = df_invalids['faulty'].apply(normalize_string)
-    df_invalids.to_sql(name='invalids', con=sqlite_connection, if_exists='replace', index=True)
-
-    sqlite_connection.close()
+    df_invalids.to_sql(name='invalids', con=conn, if_exists='replace', index=True)
+    # close connection
+    cur.close()
+    conn.close()
 
 
 def check_serial(serial: str):
     """ This function will get one serial number and return appropriate
     answer to that, after consulting the db.
     """
-    sqlite_connection = sqlite3.connect(config.DATABASE_FILE_PATH)
-    cursor = sqlite_connection.cursor()
+    print(
+        f"postgresql://{config.POST_HOST_USERNAME}:{config.POST_HOST_PASSWORD}@{config.POST_HOST}/{config.POST_HOST_DB_NAME}")
 
-    query = f"SELECT * FROM invalids WHERE faulty == '{serial}'"
-    results = cursor.execute(query)
+    # CONNECTION to DATABASE
+    conn_string = f"postgresql://{config.POST_HOST_USERNAME}:{config.POST_HOST_PASSWORD}@{config.POST_HOST}/{config.POST_HOST_DB_NAME}"
+    db = create_engine(conn_string)
+    conn = db.connect()
+    print("Successfully Connected to Postgresql")
+
+    pg_conn = psycopg2.connect(conn_string)
+    cur = pg_conn.cursor()
+
+    results = cur.execute("SELECT * FROM invalids WHERE faulty == ?", (serial,))
     if len(results.fetchall()) == 1:
         return 'This serial is among failed ones'
 
-    query = f"SELECT * FROM serials WHERE start_serial < '{serial}' and end_serial > '{serial}'"
-    results = cursor.execute(query)
+    results = cur.execute("SELECT * FROM serials WHERE start_serial <= ? and end_serial >= ?", (serial,))
     if len(results.fetchall()) > 0:
         return 'I found your serial'
 
@@ -253,4 +277,4 @@ def process():
 
 if __name__ == '__main__':
     # import_database_from_excel('Data/data.xlsx')
-    app.run(host="0.0.0.0", port=5000)
+    app.run()
