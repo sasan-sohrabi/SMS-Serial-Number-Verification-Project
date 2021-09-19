@@ -282,7 +282,13 @@ def process():
     return jsonify(ret), 200
 
 
+# If there is not valid url return 404 page (not found page)
+@app.errorhandler(404)
+def page_not_found(n):
+    return render_template('404.html'), 404
+
+
 if __name__ == '__main__':
     # import_database_from_excel('Data/data.xlsx')
-    print(check_serial('JJ101'))
-    app.run()
+    # print(check_serial('JJ101'))
+    app.run("0.0.0.0", 5000, debug=True)
