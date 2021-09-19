@@ -215,11 +215,13 @@ def import_database_from_excel(filepath):
                     id INTEGER PRIMARY KEY,
                     faulty CHAR(30));""")
     pg_conn.commit()
+
     # df_invalids contains lookup data in the form of
     # Faulty
     df_invalids = pd.read_excel(filepath, 1)  # Sheet one contains failed serial numbers. Only one column
     df_invalids['faulty'] = df_invalids['faulty'].apply(normalize_string)
     df_invalids.to_sql(name='invalids', con=conn, if_exists='replace', index=True)
+
     # close connection
     cur.close()
     conn.close()
@@ -241,15 +243,20 @@ def check_serial(serial: str):
     pg_conn = psycopg2.connect(conn_string)
     cur = pg_conn.cursor()
 
-    results = cur.execute("SELECT * FROM invalids WHERE faulty == ?", (serial,))
-    if len(results.fetchall()) == 1:
+    cur.execute("SELECT * FROM invalids WHERE faulty = %s;", (normalize_string(serial),))
+    if len(cur.fetchall()) == 1:
         return 'This serial is among failed ones'
 
-    results = cur.execute("SELECT * FROM serials WHERE start_serial <= ? and end_serial >= ?", (serial,))
-    if len(results.fetchall()) > 0:
+    cur.execute("SELECT * FROM serials WHERE start_serial <= %s and end_serial >= %s;",
+                (normalize_string(serial), normalize_string(serial)))
+    if len(cur.fetchall()) > 0:
         return 'I found your serial'
 
     return 'It was not in the db'
+
+    # close connection
+    cur.close()
+    conn.close()
 
 
 @app.route(f'/v1/{CALL_BACK_TOKEN}/process', methods=['POST'])
@@ -277,4 +284,5 @@ def process():
 
 if __name__ == '__main__':
     # import_database_from_excel('Data/data.xlsx')
+    print(check_serial('JJ101'))
     app.run()
