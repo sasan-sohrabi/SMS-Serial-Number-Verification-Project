@@ -10,7 +10,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from sqlalchemy import create_engine
 import psycopg2
-import pymysql
+from streamlit import caching
 
 app = Flask(__name__)
 
@@ -244,19 +244,32 @@ def check_serial(serial: str):
     cur = pg_conn.cursor()
 
     cur.execute("SELECT * FROM invalids WHERE faulty = %s;", (normalize_string(serial),))
-    if len(cur.fetchall()) == 1:
+    if len(cur.fetchall()) > 0:
+        cur.close()
+        conn.close()
         return 'This serial is among failed ones'
 
     cur.execute("SELECT * FROM serials WHERE start_serial <= %s and end_serial >= %s;",
                 (normalize_string(serial), normalize_string(serial)))
-    if len(cur.fetchall()) > 0:
+
+    print(cur.fetchall())
+
+    if cur.fetchall():
+        cur.close()
+        conn.close()
+        print('saaaaaaaaaaaaaaaaa')
+        return 'sasani'
+
+    if len(cur.fetchall()) > 1:
+        cur.close()
+        conn.close()
         return 'I found your serial'
 
+    cur.close()
+    conn.close()
     return 'It was not in the db'
 
     # close connection
-    cur.close()
-    conn.close()
 
 
 @app.route(f'/v1/{CALL_BACK_TOKEN}/process', methods=['POST'])
@@ -284,11 +297,13 @@ def process():
 
 # If there is not valid url return 404 page (not found page)
 @app.errorhandler(404)
-def page_not_found(n):
+def page_not_found(error):
     return render_template('404.html'), 404
 
 
 if __name__ == '__main__':
+    caching.clear_cache()
+    caching.clear_cache()
     # import_database_from_excel('Data/data.xlsx')
-    # print(check_serial('JJ101'))
-    app.run("0.0.0.0", 5000, debug=True)
+    print(check_serial('JM250'))
+    app.run("0.0.0.0", 5000)
