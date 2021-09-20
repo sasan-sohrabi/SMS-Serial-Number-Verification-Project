@@ -76,16 +76,20 @@ def home():
             flash('Import excel file to database successfully!', 'success')
             #
             return redirect('/')
-    html_str = '''
-    <!doctype html>
-    <title>Upload new File</title>
-    <h1>Upload new File</h1>
-    <form method=post enctype=multipart/form-data>
-      <input type=file name=file>th
-      <input type=submit value=Upload>
-    </form>
-    '''
-    return render_template('index.html')
+
+    # CONNECTION to DATABASE
+    conn_string = f"postgresql://{config.POST_HOST_USERNAME}:{config.POST_HOST_PASSWORD}@{config.POST_HOST}/{config.POST_HOST_DB_NAME}"
+    print("Successfully Connected to Postgresql")
+    pg_conn = psycopg2.connect(conn_string)
+    cur = pg_conn.cursor()
+    cur.execute('SELECT * FROM processed_sms ORDER BY date DESC LIMIT 5000;')
+
+    all_smss = cur.fetchall()
+    smss = []
+    for sms in all_smss:
+        sender, message, answer, date = sms
+        smss.append({'sender': sender, 'message': message, 'answer': answer, 'date': date})
+    return render_template('index.html', data={'smss': smss})
 
 
 @app.route('/check_one_serial', methods=["POST"])
@@ -324,9 +328,4 @@ def page_not_found(error):
 
 
 if __name__ == '__main__':
-    # caching.clear_cache()
-    # caching.clear_cache()
-    # import_database_from_excel('app/Data/data.xlsx')
-    # process('09195145937', 'JM200')
-    # print(check_serial('JM200'))
     app.run("0.0.0.0", 5000)
