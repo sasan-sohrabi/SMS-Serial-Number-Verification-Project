@@ -88,6 +88,15 @@ def home():
     return render_template('index.html')
 
 
+@app.route('/check_one_serial', methods=["POST"])
+@login_required
+def check_one_serial():
+    serial_to_check = request.form['serial']
+    answer = check_serial(normalize_string(serial_to_check))
+    flash(answer, 'info')
+    return redirect('/')
+
+
 # somewhere to login
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute")
@@ -244,23 +253,23 @@ def check_serial(serial: str):
     cur = pg_conn.cursor()
 
     cur.execute("SELECT * FROM invalids WHERE faulty = %s;", (normalize_string(serial),))
-    if len(cur.fetchall()) > 0:
+    result_faulty = cur.fetchall()
+    if len(result_faulty) > 0:
         cur.close()
         conn.close()
         return 'This serial is among failed ones'
 
     cur.execute("SELECT * FROM serials WHERE start_serial <= %s and end_serial >= %s;",
                 (normalize_string(serial), normalize_string(serial)))
-
-    print(cur.fetchall())
-
-    if cur.fetchall():
+    result_serial = cur.fetchall()
+    print(len(result_serial))
+    if len(result_serial) == 1:
+        description = result_serial[0][3]
         cur.close()
         conn.close()
-        print('saaaaaaaaaaaaaaaaa')
-        return 'sasani'
+        return 'I found your serial ' + f"'{description}'"
 
-    if len(cur.fetchall()) > 1:
+    if len(result_serial) > 1:
         cur.close()
         conn.close()
         return 'I found your serial'
@@ -302,8 +311,8 @@ def page_not_found(error):
 
 
 if __name__ == '__main__':
-    caching.clear_cache()
-    caching.clear_cache()
+    # caching.clear_cache()
+    # caching.clear_cache()
     # import_database_from_excel('Data/data.xlsx')
-    print(check_serial('JM250'))
+    # print(check_serial('JM200'))
     app.run("0.0.0.0", 5000)
