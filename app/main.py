@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from flask import Flask, jsonify, request, Response, redirect, url_for, request, session, abort, flash, render_template
 from flask_login import LoginManager, UserMixin, login_required, login_user, logout_user, current_user
 import pandas as pd
@@ -10,7 +11,6 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from sqlalchemy import create_engine
 import psycopg2
-from streamlit import caching
 
 app = Flask(__name__)
 
@@ -158,8 +158,6 @@ def send_sms(receptor: str, message: str) -> None:
     api = KavenegarAPI(config.API_KEY)
     params = {'sender': '10000400600600', 'receptor': receptor, 'message': message}
     response = api.sms_send(params)
-    print(f"message *{message}* sent. status code is {response.status_code}")
-
 
 def normalize_string(input_str: str, fixed_size=30):
     from_persian_char = '۱۲۳۴۵۶۷۸۹۰'
@@ -212,7 +210,7 @@ def import_database_from_excel(filepath):
     pg_conn.commit()
 
     # df_serials contains lookup data in the form of
-    # row 	reference_number 	description	start_serial 	end_serial 	date
+    # row 	reference_number description start_serial  end_serial 	date
     df_serials = pd.read_excel(filepath, 0)
     df_serials[df_serials.columns[3]] = df_serials[df_serials.columns[3]].apply(normalize_string)
     df_serials[df_serials.columns[4]] = df_serials[df_serials.columns[4]].apply(normalize_string)
@@ -262,17 +260,17 @@ def check_serial(serial: str):
     cur.execute("SELECT * FROM serials WHERE start_serial <= %s and end_serial >= %s;",
                 (normalize_string(serial), normalize_string(serial)))
     result_serial = cur.fetchall()
-    print(len(result_serial))
-    if len(result_serial) == 1:
-        description = result_serial[0][3]
-        cur.close()
-        conn.close()
-        return 'I found your serial ' + f"'{description}'"
 
     if len(result_serial) > 1:
         cur.close()
         conn.close()
         return 'I found your serial'
+
+    if len(result_serial) == 1:
+        description = result_serial[0][3]
+        cur.close()
+        conn.close()
+        return 'I found your serial ' + f"'{description}'"
 
     cur.close()
     conn.close()
@@ -281,7 +279,7 @@ def check_serial(serial: str):
     # close connection
 
 
-@app.route(f'/v1/{CALL_BACK_TOKEN}/process', methods=['POST'])
+@app.route(f'/v1/process', methods=['POST'])
 def process():
     """This is callback from KaveNegar, will get sender and message and will
     check if it is valid. Then answers back.
@@ -298,6 +296,21 @@ def process():
     print(f"receive {message} from {sender}")
 
     answer = check_serial(message)
+
+    # CONNECTION to DATABASE
+    conn_string = f"postgresql://{config.POST_HOST_USERNAME}:{config.POST_HOST_PASSWORD}@{config.POST_HOST}/{config.POST_HOST_DB_NAME}"
+    print("Successfully Connected to Postgresql")
+
+    pg_conn = psycopg2.connect(conn_string)
+    pg_conn.autocommit = True
+    cur = pg_conn.cursor()
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    cur.execute("INSERT INTO processed_sms (sender, message, answer,date) VALUES (%s, %s, %s, %s)",
+                (sender, message, answer, now))
+
+    pg_conn.commit()
+    cur.close()
+
     send_sms(sender, answer)
 
     ret = {'message': 'processed'}
@@ -313,6 +326,7 @@ def page_not_found(error):
 if __name__ == '__main__':
     # caching.clear_cache()
     # caching.clear_cache()
-    # import_database_from_excel('Data/data.xlsx')
+    # import_database_from_excel('app/Data/data.xlsx')
+    # process('09195145937', 'JM200')
     # print(check_serial('JM200'))
     app.run("0.0.0.0", 5000)
