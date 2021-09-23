@@ -2,6 +2,8 @@
 import os
 import re
 import time
+from textwrap import dedent
+
 from flask import Flask, jsonify, request, Response, redirect, url_for, request, session, abort, flash, render_template
 from flask_login import LoginManager, UserMixin, login_required, login_user, logout_user, current_user
 import pandas as pd
@@ -221,35 +223,47 @@ def import_database_from_excel(filepath):
     cur = pg_conn.cursor()
 
     # Remove the serials table if exists, then create new one
-    cur.execute('Drop TABLE IF EXISTS serials')
-    cur.execute("""CREATE TABLE serials (
-                    id INTEGER PRIMARY KEY,
-                    ref VARCHAR(100),
-                    description VARCHAR(200),
-                    start_serial CHAR(30),
-                    end_serial CHAR(30),
-                    date TIMESTAMP);""")
-    pg_conn.commit()
+    try:
+        cur.execute('Drop TABLE IF EXISTS serials')
+        cur.execute("""CREATE TABLE serials (
+                        id INTEGER PRIMARY KEY,
+                        ref VARCHAR(100),
+                        description VARCHAR(200),
+                        start_serial CHAR(30),
+                        end_serial CHAR(30),
+                        date TIMESTAMP);""")
+        pg_conn.commit()
+    except:
+        flash('Problem dropping and creating new table in database', 'danger')
 
     # df_serials contains lookup data in the form of
-    # row 	reference_number description start_serial  end_serial 	date
-    df_serials = pd.read_excel(filepath, 0)
-    df_serials[df_serials.columns[3]] = df_serials[df_serials.columns[3]].apply(normalize_string)
-    df_serials[df_serials.columns[4]] = df_serials[df_serials.columns[4]].apply(normalize_string)
-    df_serials.to_sql(name='serials', con=conn, if_exists='replace', index=True)
+    # row | reference_number | description | start_serial | end_serial | date
+    try:
+        df_serials = pd.read_excel(filepath, 0)
+        df_serials[df_serials.columns[3]] = df_serials[df_serials.columns[3]].apply(normalize_string)
+        df_serials[df_serials.columns[4]] = df_serials[df_serials.columns[4]].apply(normalize_string)
+        df_serials.to_sql(name='serials', con=conn, if_exists='replace', index=True)
+    except:
+        flash('Problem to insert data to database', 'danger')
 
     # Remove the invalids table if exists, then create new one
-    cur.execute('Drop TABLE IF EXISTS invalids')
-    cur.execute("""CREATE TABLE  invalids (
-                    id INTEGER PRIMARY KEY,
-                    faulty CHAR(30));""")
-    pg_conn.commit()
+    try:
+        cur.execute('Drop TABLE IF EXISTS invalids')
+        cur.execute("""CREATE TABLE  invalids (
+                        id INTEGER PRIMARY KEY,
+                        faulty CHAR(30));""")
+        pg_conn.commit()
+    except:
+        flash('Problem dropping and creating new table in database', 'danger')
 
     # df_invalids contains lookup data in the form of
     # Faulty
-    df_invalids = pd.read_excel(filepath, 1)  # Sheet one contains failed serial numbers. Only one column
-    df_invalids['faulty'] = df_invalids['faulty'].apply(normalize_string)
-    df_invalids.to_sql(name='invalids', con=conn, if_exists='replace', index=True)
+    try:
+        df_invalids = pd.read_excel(filepath, 1)  # Sheet one contains failed serial numbers. Only one column
+        df_invalids['faulty'] = df_invalids['faulty'].apply(normalize_string)
+        df_invalids.to_sql(name='invalids', con=conn, if_exists='replace', index=True)
+    except:
+        flash('Problem dropping and creating new table in database', 'danger')
 
     # close connection
     cur.close()
@@ -260,6 +274,10 @@ def check_serial(serial: str):
     """ This function will get one serial number and return appropriate
     answer to that, after consulting the db.
     """
+
+    original_serial = serial
+    serial = normalize_string(serial)
+
     print(
         f"postgresql://{config.POST_HOST_USERNAME}:{config.POST_HOST_PASSWORD}@{config.POST_HOST}/{config.POST_HOST_DB_NAME}")
 
@@ -274,29 +292,56 @@ def check_serial(serial: str):
 
     cur.execute("SELECT * FROM invalids WHERE faulty = %s;", (normalize_string(serial),))
     result_faulty = cur.fetchall()
-    if len(result_faulty) > 0:
-        cur.close()
-        conn.close()
-        return 'FAILURE', 'This serial is among failed ones'
+    if result_faulty > 0:
+        answer = dedent(f"""\
+            {original_serial}
+            این شماره هولوگرام یافت نشد. لطفا دوباره سعی کنید  و یا با واحد پشتیبانی تماس حاصل فرمایید.
+            ساختار صحیح شماره هولوگرام بصورت دو حرف انگلیسی و 7 یا 8 رقم در دنباله آن می باشد. مثال:
+            FA1234567
+            شماره تماس با بخش پشتیبانی فروش شرکت التک:
+            021-22038385""")
+
+        return 'FAILURE', answer
 
     cur.execute("SELECT * FROM serials WHERE start_serial <= %s and end_serial >= %s;",
                 (normalize_string(serial), normalize_string(serial)))
     result_serial = cur.fetchall()
 
-    if len(result_serial) > 1:
-        cur.close()
-        conn.close()
-        return 'DOUBLE', 'I found your serial'
+    if result_serial > 1:
+        answer = dedent(f"""\
+            {original_serial}
+            این شماره هولوگرام مورد تایید است.
+            برای اطلاعات بیشتر از نوع محصول با بخش پشتیبانی فروش شرکت التک تماس حاصل فرمایید:
+            021-22038385""")
+        return 'DOUBLE', answer
 
-    if len(result_serial) == 1:
-        description = result_serial[0][3]
-        cur.close()
-        conn.close()
-        return 'OK', 'I found your serial ' + f"'{description}'"
+    elif result_serial == 1:
+        ret = cur.fetchone()
+        desc = ret[2]
+        ref_number = ret[1]
+        date = ret[5].date()
+        answer = dedent(f"""\
+            {original_serial}
+            {ref_number}
+            {desc}
+            Hologram date: {date}
+            Genuine product of Schneider Electric
+            شماره تماس با بخش پشتیبانی فروش شرکت التک:
+            021-22038385""")
+        return 'OK', answer
 
     cur.close()
     conn.close()
-    return 'NOT-FOUND', 'It was not in the db'
+
+    answer = dedent(f"""\
+        {original_serial}
+        این شماره هولوگرام یافت نشد. لطفا دوباره سعی کنید  و یا با واحد پشتیبانی تماس حاصل فرمایید.
+        ساختار صحیح شماره هولوگرام بصورت دو حرف انگلیسی و 7 یا 8 رقم در دنباله آن می باشد. مثال:
+        FA1234567
+        شماره تماس با بخش پشتیبانی فروش شرکت التک:
+        021-22038385""")
+
+    return 'NOT-FOUND', answer
 
     # close connection
 
