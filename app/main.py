@@ -1,3 +1,4 @@
+# Import relevant library for sms project
 import os
 import re
 import time
@@ -82,22 +83,38 @@ def home():
     print("Successfully Connected to Postgresql")
     pg_conn = psycopg2.connect(conn_string)
     cur = pg_conn.cursor()
-    cur.execute('SELECT * FROM processed_sms ORDER BY date DESC LIMIT 5000;')
 
+    # Get last 5000 smss
+    cur.execute('SELECT * FROM processed_sms ORDER BY date DESC LIMIT 5000;')
     all_smss = cur.fetchall()
     smss = []
     for sms in all_smss:
-        sender, message, answer, date = sms
-        smss.append({'sender': sender, 'message': message, 'answer': answer, 'date': date})
-    return render_template('index.html', data={'smss': smss})
+        status, sender, message, answer, date = sms
+        smss.append({'status': status, 'sender': sender, 'message': message, 'answer': answer, 'date': date})
+
+    # Collect some stats for the GUI
+    cur.execute("SELECT count(*) FROM processed_sms WHERE status = 'OK'")
+    num_ok = cur.fetchone()[0]
+
+    cur.execute("SELECT count(*) FROM processed_sms WHERE status = 'FAILURE'")
+    num_failure = cur.fetchone()[0]
+
+    cur.execute("SELECT count(*) FROM processed_sms WHERE status = 'DOUBLE'")
+    num_double = cur.fetchone()[0]
+
+    cur.execute("SELECT count(*) FROM processed_sms WHERE status = 'NOT-FOUND'")
+    num_notfound = cur.fetchone()[0]
+
+    return render_template('index.html', data={'smss': smss, 'ok': num_ok, 'failure': num_failure, 'double': num_double,
+                                               'notfound': num_notfound})
 
 
 @app.route('/check_one_serial', methods=["POST"])
 @login_required
 def check_one_serial():
     serial_to_check = request.form['serial']
-    answer = check_serial(normalize_string(serial_to_check))
-    flash(answer, 'info')
+    status, answer = check_serial(normalize_string(serial_to_check))
+    flash(f'{status} - {answer}', 'info')
     return redirect('/')
 
 
@@ -163,6 +180,7 @@ def send_sms(receptor: str, message: str) -> None:
     params = {'sender': '10000400600600', 'receptor': receptor, 'message': message}
     response = api.sms_send(params)
 
+
 def normalize_string(input_str: str, fixed_size=30):
     from_persian_char = '۱۲۳۴۵۶۷۸۹۰'
     from_arabic_char = '٠١٢٣٤٥٦٧٨٩'
@@ -210,7 +228,7 @@ def import_database_from_excel(filepath):
                     description VARCHAR(200),
                     start_serial CHAR(30),
                     end_serial CHAR(30),
-                    date DATE);""")
+                    date TIMESTAMP);""")
     pg_conn.commit()
 
     # df_serials contains lookup data in the form of
@@ -259,7 +277,7 @@ def check_serial(serial: str):
     if len(result_faulty) > 0:
         cur.close()
         conn.close()
-        return 'This serial is among failed ones'
+        return 'FAILURE', 'This serial is among failed ones'
 
     cur.execute("SELECT * FROM serials WHERE start_serial <= %s and end_serial >= %s;",
                 (normalize_string(serial), normalize_string(serial)))
@@ -268,17 +286,17 @@ def check_serial(serial: str):
     if len(result_serial) > 1:
         cur.close()
         conn.close()
-        return 'I found your serial'
+        return 'DOUBLE', 'I found your serial'
 
     if len(result_serial) == 1:
         description = result_serial[0][3]
         cur.close()
         conn.close()
-        return 'I found your serial ' + f"'{description}'"
+        return 'OK', 'I found your serial ' + f"'{description}'"
 
     cur.close()
     conn.close()
-    return 'It was not in the db'
+    return 'NOT-FOUND', 'It was not in the db'
 
     # close connection
 
@@ -299,7 +317,7 @@ def process():
     message = normalize_string(data['message'])
     print(f"receive {message} from {sender}")
 
-    answer = check_serial(message)
+    status, answer = check_serial(message)
 
     # CONNECTION to DATABASE
     conn_string = f"postgresql://{config.POST_HOST_USERNAME}:{config.POST_HOST_PASSWORD}@{config.POST_HOST}/{config.POST_HOST_DB_NAME}"
@@ -309,8 +327,8 @@ def process():
     pg_conn.autocommit = True
     cur = pg_conn.cursor()
     now = time.strftime('%Y-%m-%d %H:%M:%S')
-    cur.execute("INSERT INTO processed_sms (sender, message, answer,date) VALUES (%s, %s, %s, %s)",
-                (sender, message, answer, now))
+    cur.execute("INSERT INTO processed_sms (status, sender, message, answer,date) VALUES (%s, %s, %s, %s, %s)",
+                (status, sender, message, answer, now))
 
     pg_conn.commit()
     cur.close()
