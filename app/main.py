@@ -72,12 +72,14 @@ def home():
             flash('No selected file', 'danger')
             return redirect(request.url)
         if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-            import_database_from_excel(file_path)
-            flash('Import excel file to database successfully!', 'success')
-            #
+            try:
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                import_database_from_excel(file_path)
+                flash('Import excel file to database successfully!', 'success')
+            except Exception as e:
+                flash(f'Wrong to insert data from excel to database!-{e}', 'danger')
             return redirect('/')
 
     # CONNECTION to DATABASE
@@ -107,6 +109,7 @@ def home():
     cur.execute("SELECT count(*) FROM processed_sms WHERE status = 'NOT-FOUND'")
     num_notfound = cur.fetchone()[0]
 
+    cur.close()
     return render_template('index.html', data={'smss': smss, 'ok': num_ok, 'failure': num_failure, 'double': num_double,
                                                'notfound': num_notfound})
 
@@ -156,7 +159,7 @@ def logout():
 
 # handle login failed
 @app.errorhandler(401)
-def page_not_found(error):
+def unauthorized(error):
     flash('Login Problem', 'danger')
     return redirect('/login')
 
@@ -292,7 +295,7 @@ def check_serial(serial: str):
 
     cur.execute("SELECT * FROM invalids WHERE faulty = %s;", (normalize_string(serial),))
     result_faulty = cur.fetchall()
-    if result_faulty > 0:
+    if len(result_faulty) > 0:
         answer = dedent(f"""\
             {original_serial}
             این شماره هولوگرام یافت نشد. لطفا دوباره سعی کنید  و یا با واحد پشتیبانی تماس حاصل فرمایید.
@@ -307,7 +310,7 @@ def check_serial(serial: str):
                 (normalize_string(serial), normalize_string(serial)))
     result_serial = cur.fetchall()
 
-    if result_serial > 1:
+    if len(result_serial) > 1:
         answer = dedent(f"""\
             {original_serial}
             این شماره هولوگرام مورد تایید است.
@@ -315,11 +318,11 @@ def check_serial(serial: str):
             021-22038385""")
         return 'DOUBLE', answer
 
-    elif result_serial == 1:
-        ret = cur.fetchone()
-        desc = ret[2]
-        ref_number = ret[1]
-        date = ret[5].date()
+    elif len(result_serial) == 1:
+        ret = result_serial[0]
+        desc = ret[3]
+        ref_number = ret[2]
+        date = ret[6].date()
         answer = dedent(f"""\
             {original_serial}
             {ref_number}
@@ -391,4 +394,4 @@ def page_not_found(error):
 
 
 if __name__ == '__main__':
-    app.run("0.0.0.0", 5000)
+    app.run(debug=False)
